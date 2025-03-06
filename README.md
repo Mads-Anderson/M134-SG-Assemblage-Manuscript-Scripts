@@ -12,4 +12,6 @@ This repository contains analysis scripts used for the manuscript "The Abundance
 
 5. **05_SO_Comparison.rmd** This script contains code for data manipulation, non-metric multidimensional scaling (NMDS), and visualizations of Southern Ocean samples. It generates two key plots: one showing NMDS with species richness across stations, and another depicting NMDS with carbon type at each station. Figure 7 in Anderson et al. manuscript.
 
-7. **06_Poly_Comparison** This script processes ecological data using Non-Metric Multidimensional Scaling (NMDS) to explore the relationship between sites and species based on Polychaete abundance data across the Southern Ocean. Supplementary Materials 6 in Anderson et al. manuscript. 
+7. **06_Poly_Comparison** This script processes ecological data using Non-Metric Multidimensional Scaling (NMDS) to explore the relationship between sites and species based on Polychaete abundance data across the Southern Ocean. Supplementary Materials 6 in Anderson et al. manuscript.
+
+Please download the csv files containing data from the Polar Data Centre.
