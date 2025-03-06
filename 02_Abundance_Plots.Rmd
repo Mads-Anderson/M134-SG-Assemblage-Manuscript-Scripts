@@ -1,0 +1,265 @@
+---
+title: "MA_M134_Abundance"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Set Up
+
+```{r setup}
+rm(list = ls())
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, tidy.opts = list(
+    width.cutoff = 60))
+```
+
+## Required libraries
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(viridisLite)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+```
+
+## Bring in data
+
+```{r}
+phy_tab <- read_excel(
+  "TaxaList.csv", # Available in Supplementary)%>%
+  rename(Name = `...1`) %>% 
+  distinct(Taxon, Phylum)
+
+norm_abun_taxa <- read_excel(
+  "Anderson_Pape_Linse_M134_NormSppCorHor.csv")%>%
+  rename(MUC = `...1`) %>% 
+  t()%>%
+  as.data.frame()
+```
+
+```{r}
+# Assign the first row of 'norm_abun_taxa' as the column names
+colnames(norm_abun_taxa) <- norm_abun_taxa[1, ]
+
+# Remove the first row from 'norm_abun_taxa'
+norm_abun_taxa <- norm_abun_taxa[-1, ]
+
+# Merging data with the taxonomic information from 'phy_tab'. Convert row names to a new column called "Taxon" for joining purposes. Left join 'phy_tab' to add phylum information based on the "Taxon" column. Remove the "Taxon" column as it's no longer needed. Arrange the data by "Phylum" for better organization. Convert all columns except "Phylum" to numeric data type. Group the data by "Phylum". Sum the values for each "Phylum" group across all MUC columns. Transpose the data frame so that rows become columns and vice versa. Convert the transposed data back into a data frame
+merged_df <- norm_abun_taxa %>%
+  rownames_to_column("Taxon") %>%
+  left_join(phy_tab, by = "Taxon") %>%
+  select(-Taxon) %>%
+  arrange(Phylum) %>%
+  mutate(across(-Phylum, as.numeric)) %>%
+  group_by(Phylum) %>%
+  summarise_all(sum) %>%
+  t() %>% 
+  as.data.frame()
+
+# Assign the first row of 'merged_df' as the column names
+colnames(merged_df) <- merged_df[1, ]
+
+# Remove the first row, as it's now redundant, Remove the "Indet" column
+merged_df <- merged_df[-1, ]
+
+# Convert all columns to numeric and add a new column called "MUC", Convert row names to a new column called "MUC"
+norm_abun_taxa <- merged_df %>%
+   mutate_all(as.numeric) %>% 
+   rownames_to_column("MUC")
+```
+
+# Split the dataset into 0-2 cm and 2-5 cm depth
+
+```{r}
+# Split the dataset into 0-2 cm depth. Filter rows where the "MUC" column ends with "_0-2". Extract the "MUC" part and the depth part ("D") using a regular expression. Convert the data from wide to long format
+norm_abun_taxa_0_2 <- norm_abun_taxa[
+  grepl("_0-2$", norm_abun_taxa$MUC), 
+] %>% 
+  extract(
+    MUC, 
+    into = c("MUC", "D"), 
+    regex = "^(.*?)_(.*?)$",  # Matches anything before and after the underscore
+    remove = TRUE  # Remove the original "MUC" column after extraction
+  ) %>%
+  select(-D) %>%
+  pivot_longer(
+    cols = -MUC,  
+    names_to = "Taxa",  
+    values_to = "Count" 
+  )
+
+# Split the dataset into 2-5 cm depth
+norm_abun_taxa_2_5 <- norm_abun_taxa[
+  grepl("_2-5$", norm_abun_taxa$MUC), 
+] %>%
+  extract(
+    MUC, 
+    into = c("MUC", "D"), 
+    regex = "^(.*?)_(.*?)$",  
+    remove = TRUE
+  ) %>%
+  select(-D) %>%
+  pivot_longer(
+    cols = -MUC,  
+    names_to = "Taxa",  
+    values_to = "Count" 
+  )
+```
+
+# Species count for 0-2 cm and 2-5 cm depth
+
+```{r}
+# Process the data to extract depth information and average values. Extract the "MUC" and "CD" (Core_Depth) parts from the "MUC" column. Further split "CD" into "Core" and "Depth". Remove the "Core" column, retaining only "MUC" and "Depth". Unite the "MUC" and "Depth" columns into a single column named "MUC_Depth". Group the data by the newly created "MUC_Depth" column. Summarise the data by calculating the mean of numeric columns, ignoring missing values. Reshape the data from wide format to long format, where "MUC_Depth" remains as the identifier, and other columns are converted to key-value pairs. Round the "Count" values to the nearest whole number
+norm_abun <- norm_abun %>%
+  extract(MUC, into = c("MUC", "CD"), regex = "^(.*?)_(.*?)$", remove = TRUE) %>%
+  extract(CD, into = c("Core", "Depth"), regex = "^(.*?)_(.*?)$", remove = TRUE) %>%
+  select(-Core) %>%
+  unite("MUC_Depth", `MUC`:`Depth`, remove = TRUE, sep = "_") %>%
+  group_by(MUC_Depth) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  pivot_longer(cols = -MUC_Depth, names_to = "Taxa", values_to = "Count") %>%
+  mutate(Count = round(Count))
+
+# Subset the data for the 0-2 cm depth range based on the "MUC_Depth" column
+norm_abun_0_2 <- subset(norm_abun, grepl("_0-2$", MUC_Depth))
+
+# Subset the data for the 2-5 cm depth range based on the "MUC_Depth" column
+norm_abun_2_5 <- subset(norm_abun, grepl("_2-5$", MUC_Depth))
+
+# Process the 0-2 cm depth data. Convert counts greater than 0 to 1, representing presence/absence data. Split the "MUC_Depth" column back into separate "MUC" and "Depth" columns. Remove the "Taxa" and "Depth" columns, retaining only the "MUC" and counts. Group the data by "MUC". Summarise the data by summing the counts for each "MUC". 
+df0_2 <- norm_abun_0_2 %>%
+  mutate(Count = ifelse(Count > 0, 1, Count)) %>%
+  extract(MUC_Depth, into = c("MUC", "Depth"), regex = "^(.*?)_(.*?)$", remove = TRUE) %>%
+  select(-Taxa, -Depth) %>%
+  group_by(MUC) %>%
+  summarise_all(sum)
+
+# Process the 2-5 cm depth data, following the same steps as for the 0-2 cm data. 
+df2_5 <- norm_abun_2_5 %>%
+  mutate(Count = ifelse(Count > 0, 1, Count)) %>%
+  extract(MUC_Depth, into = c("MUC", "Depth"), regex = "^(.*?)_(.*?)$", remove = TRUE) %>%
+  select(-Taxa, -Depth) %>%
+  group_by(MUC) %>%
+  summarise_all(sum)
+```
+
+# Order for taxa on the figure 
+
+```{r}
+desired_order <- c("Annelida", "Arthropoda", "Bryozoa", "Echinodermata", "Mollusca", "Nematoda", "Nemertea", "Sipunculida", "Indet")
+```
+
+# Relative Abundance Plots 
+
+```{r}
+# Plot for relative abundance data from 0 to 2 cm
+norm_abun_taxa_0_2$Taxa <- factor(norm_abun_taxa_0_2$Taxa, levels = desired_order)
+
+rel_abun_0_2 <- ggplot(data = norm_abun_taxa_0_2, aes(x = MUC, y = Count)) +
+  geom_col(data = norm_abun_taxa_0_2, aes(fill = Taxa), position = "fill") +
+  geom_text(data = df0_2, aes(x = MUC, y = 1.05, label = Count), size = 2)  +
+  scale_fill_viridis_d(direction = -1) +
+  labs(x = "Station Number", y = "Relative Abundance (%)", fill = "Phylum") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "right",
+    axis.title.y = element_text(face = "bold", size = 10, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 10, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 8, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 8, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )
+rel_abun_0_2
+
+# Plot for relative abundance data from 2 to 5 cm
+norm_abun_taxa_2_5$Taxa <- factor(norm_abun_taxa_2_5$Taxa, levels = desired_order)
+
+rel_abun_2_5 <- ggplot(data = norm_abun_taxa_2_5, aes(x = MUC, y = Count)) +
+  geom_col(data = norm_abun_taxa_2_5, aes(fill = Taxa), position = "fill") +
+  geom_text(data = df2_5, aes(x = MUC, y = 1.05, label = Count), size = 2)  +
+  scale_fill_viridis_d(direction = -1) +
+  labs(x = "Station Number", y = "Relative Abundance (%)", fill = "Phylum") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "right",
+    axis.title.y = element_text(face = "bold", size = 10, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 10, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 8, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 8, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )
+```
+
+# Absolute Abundance Plots
+
+```{r}
+# Plot for absolute abundance data from 0 to 2 cm
+norm_abun_taxa_0_2$Taxa <- factor(norm_abun_taxa_0_2$Taxa, levels = desired_order)
+
+abs_abun_0_2 <- ggplot(data = norm_abun_taxa_0_2, aes(x = MUC, y = Count)) +
+  geom_col(data = norm_abun_taxa_0_2, aes(fill = Taxa), position = "stack") +
+  geom_text(data = df0_2, aes(x = MUC, y = 26000, label = Count), size = 2)  +
+  scale_fill_viridis_d(direction = -1) +
+  labs(x = "Station Number", y = expression(bold("Absolute Abundance (m"^"-2"~")")), fill = "Phylum") +
+  scale_y_continuous(expand = c(0, 0.5), limits = c(0, 27500), labels = scales::comma) +
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "right",
+    axis.title.y = element_text(face = "bold", size = 10, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 10, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 8, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 8, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )
+
+# Plot for absolute abundance data from 2 to 5 cm
+norm_abun_taxa_2_5$Taxa <- factor(norm_abun_taxa_2_5$Taxa, levels = desired_order)
+
+abs_abun_2_5 <- ggplot(data = norm_abun_taxa_2_5, aes(x = MUC, y = Count)) +
+  geom_col(data = norm_abun_taxa_2_5, aes(fill = Taxa), position = "stack") +
+  geom_text(data = df2_5, aes(x = MUC, y = 26000, label = Count), size = 2)  +
+  scale_fill_viridis_d(direction = -1) +
+  labs(x = "Station Number", y = expression(bold("Absolute Abundance (m"^"-2"~")")), fill = "Phylum") +
+  scale_y_continuous(expand = c(0, 0.5), limits = c(0, 27500), labels = scales::comma) +
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "right",
+    axis.title.y = element_text(face = "bold", size = 10, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 10, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 8, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 8, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )
+```
+
+# Final plot 
+
+```{r}
+combined_plot <- ggarrange(rel_abun_0_2, rel_abun_2_5, abs_abun_0_2, abs_abun_2_5,
+                           labels = c("A", "B", "C", "D"),
+                           nrow = 2, ncol = 2, common.legend = TRUE, legend = "bottom")
+```
+
+```{r}
+ggsave(dpi=600, height=8, width=6, units=c("in"), paste0("figures/",
+              format(Sys.time(), "%Y-%m-%d_"),
+              "combined_abun.jpg"))
+```

@@ -1,0 +1,152 @@
+---
+title: "MA_M134_Bell_Comparison"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup}
+rm(list = ls())
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, tidy.opts = list(
+    width.cutoff = 60))
+```
+
+```{r}
+library(tidyverse)  
+library(readxl)    
+library(vegan)     
+library(ggplot2)    
+library(ggrepel) 
+```
+
+```{r}
+combined_hr_glo_df <- read_csv(
+  "Anderson_Pape_Linse_M134_Poly_Combined.csv") 
+```
+
+```{r}
+# Apply Hellinger transformation to the abundance data (normalization of species data)
+abun_hel <- decostand(combined_hr_glo_df, method = "hellinger")
+
+# Perform NMDS analysis (Non-metric Multidimensional Scaling) on the transformed abundance data
+spp_nmds <- metaMDS(abun_hel)
+
+# Visualize the stress of the NMDS fit (lower stress means better fit)
+stressplot(spp_nmds)
+
+# Extract the stress value for the NMDS fit
+stress_valuep <- spp_nmds$stress
+stress_valuep  # Display the stress value
+```
+
+```{r}
+# Extract site scores from the NMDS analysis and convert to a data frame
+stn_nmds <- spp_nmds %>%
+  scores(display = "sites") %>%  # Get NMDS scores for sites
+  as.data.frame() %>%  # Convert to data frame
+  rownames_to_column(var = "sites")  # Add site names as a new column
+
+# Extract species scores from the NMDS analysis and convert to a data frame
+spp_nmds_score <- spp_nmds %>%
+  scores(display = "species") %>%  # Get NMDS scores for species
+  as.data.frame() %>%  # Convert to data frame
+  rownames_to_column(var = "species")  # Add species names as a new column
+
+# Duplicate species column for further operations and remove original species column
+spp_nmds_score$species_dup <- spp_nmds_score$species
+spp_nmds_score <- spp_nmds_score %>%
+    column_to_rownames("species_dup")  # Set species column as row names
+```
+
+```{r}
+# Function to assign labels based on sites
+assign_label_location <- function(sites) {
+  label_vector <- c(
+    "112" = "SG", "117" = "SG", "118" = "SG", "120" = "SG", "121" = "SG",
+    "OV" = "HT NAP", "HR01" = "HT NAP", "HR02" = "HT NAP", "3S01" = "HT NAP", "3S02" = "HT NAP", "Axe" = "HT NAP",
+    "01_x" = "SG",
+    "03_C-04" = "SG", "03_C-06" = "SG", "03_C-10" = "SG", "03_C-12" = "SG",
+    "04_C-08" = "SG", "04_C-10" = "SG", "04_C-12" = "SG",
+    "05_C-03" = "SG", "05_C-06" = "SG", "05_C-08" = "SG", "05_C-12" = "SG", 
+    "06_C-02" = "SG", "06_C-04" = "SG", 
+    "07_C-02" = "SG", "07_C-04" = "SG", "07_C-12" = "SG",
+    "08_C-02" = "SG", "08_C-06" = "SG", "08_C-09" = "SG", "08_C-12" = "SG", 
+    "11_C-02" = "SG", "11_C-08" = "SG", "11_C-10" = "SG", "11_C-11" = "SG", "11_C-12" = "SG",
+    "12_C-02/10" = "SG", "12_C-02/6" = "SG", "12_C-05" = "SG", "12_C-06" = "SG",
+    "13_C-08" = "SG", "13_C-09" = "SG", "13_C-10" = "SG", "13_C-12" = "SG",
+    "14_C-08" = "SG", "14_C-09" = "SG", "14_C-10" = "SG", "14_C-11" = "SG", 
+    "A" = "FB NAP", "B" = "FB NAP", "C" = "FB NAP"
+  )
+  return(label_vector[sites]) # Return assigned location based on site
+}
+
+# Function to assign labels based on carbon sources
+assign_label_carbon <- function(carbon) {
+  label_vector <- c(
+    "112" = "JC55", "117" = "JC55", "118" = "JC55", "120" = "JC55", "121" = "JC55",
+    "OV" = "JC55", "HR01" = "JC55", "HR02" = "JC55", "3S01" = "JC55", "3S02" = "JC55", "Axe" = "JC55",
+    "01_x" = "M134",
+    "03_C-04" = "M134", "03_C-06" = "M134", "03_C-10" = "M134", "03_C-12" = "M134",
+    "04_C-08" = "M134", "04_C-10" = "M134", "04_C-12" = "M134",
+    "05_C-03" = "M134", "05_C-06" = "M134", "05_C-08" = "M134", "05_C-12" = "M134", 
+    "06_C-02" = "M134", "06_C-04" = "M134", 
+    "07_C-02" = "M134", "07_C-04" = "M134", "07_C-12" = "M134",
+    "08_C-02" = "M134", "08_C-06" = "M134", "08_C-09" = "M134", "08_C-12" = "M134", 
+    "11_C-02" = "M134", "11_C-08" = "M134", "11_C-10" = "M134", "11_C-11" = "M134", "11_C-12" = "M134",
+    "12_C-02/10" = "M134", "12_C-02/6" = "M134", "12_C-05" = "M134", "12_C-06" = "M134",
+    "13_C-08" = "M134", "13_C-09" = "M134", "13_C-10" = "M134", "13_C-12" = "M134",
+    "14_C-08" = "M134", "14_C-09" = "M134", "14_C-10" = "M134", "14_C-11" = "M134", 
+    "A" = "FOODBANKS", "B" = "FOODBANKS", "C" = "FOODBANKS"
+  )
+  return(label_vector[carbon]) # Return assigned carbon source based on site
+}
+
+# Add location and carbon labels to the NMDS data
+stn_nmds <- stn_nmds %>%
+  mutate(colours = assign_label_location(sites),  # Add location labels
+         carbon = assign_label_carbon(sites))  # Add carbon source labels
+```
+
+
+```{r}
+# Define custom color palette for different locations
+color_palette <- c("SG" = "#440154", 
+                   "HT NAP" = "#21908C", 
+                   "FB NAP" = "#5DC863")
+
+# Define custom shapes for different carbon sources
+custom_shapes <- c("M134" = 16, "JC55" = 17, "FOODBANKS" = 15)
+
+# Set the factor levels for location and carbon labels
+stn_nmds <- stn_nmds %>%
+  mutate(colours = factor(colours, levels = names(color_palette)), 
+         carbon = factor(carbon, levels = names(custom_shapes)))  # Ensure correct order
+
+# Create NMDS plot with custom colors and shapes
+p <- ggplot(stn_nmds, aes(x = NMDS1, y = NMDS2)) +
+  geom_point(aes(shape = carbon, color = colours), size = 3.5) +  # Points with color and shape mapping
+  labs(x = "NMDS1", y = "NMDS2",  # Axis labels
+       color = "Location", shape = "Carbon Type") +
+  scale_color_manual(values = color_palette) +  # Apply custom color palette
+  scale_shape_manual(values = custom_shapes) +  # Apply custom shapes for carbon types
+  theme_bw(base_size = 10) +  # Set black and white theme
+  theme(  # Customize theme for aesthetics
+    legend.position = "right",
+    axis.title.y = element_text(face = "bold", size = 12, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 12, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 12, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )
+```
+
+```{r}
+# Save the generated NMDS plot to a high-resolution JPEG file
+ggsave(dpi=600, height=6, width=10, units=c("in"), paste0("figures/",
+              format(Sys.time(), "%Y-%m-%d_"),
+              "poly_nmds.jpg"))
+```

@@ -1,0 +1,182 @@
+---
+title: "MA_M134_Biol_Then_Environmental_And_Biol_Analyses_Again"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup}
+rm(list = ls())
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, tidy.opts = list(
+    width.cutoff = 60))
+```
+
+# Load necessary packages
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(vegan)
+library(ggplot2)
+library(ggrepel)
+library(ggordiplots)
+library(patchwork)
+library(ggpubr)
+```
+
+#  Load data
+
+```{r}
+# Load species absolute abundance data
+spp_abs <- read_excel("Anderson_Pape_Linse_M134_AbsSppCorHor.csv") %>%
+  rename(Core = `...1`) %>%  # Rename first unnamed column to 'Core'
+  column_to_rownames("Core")  # Set 'Core' as row names
+
+#Load environmental data
+envctd <- read_excel(
+  "Anderson_Pape_Linse_M134_Env.csv")%>%
+  rename(Methane = `Methane_umolL-1`)%>%
+  column_to_rownames(var = "Sample_ID") %>% 
+  filter(complete.cases(.)) %>%
+  select(-Core_Depth, -MUC_Num, -CTD_Kit_No, -CTD_Depth)
+```
+
+# Remove the singletons from abun
+
+```{r}
+spp_abs_tot <- colSums(spp_abs)  # Calculate total abundance for each species
+spp_to_remove <- spp_abs_tot[spp_abs_tot < 2]  # Identify species with <2 individuals
+filtered_df <- data.frame(Species = names(spp_to_remove), Total_Individuals = spp_to_remove)  # Create dataframe of removed species
+filtered_df_t <- t(filtered_df)  # Transpose the dataframe (not needed here)
+abun <- abun[, !names(abun) %in% filtered_df_t]  # Remove singleton species from abundance dataset
+```
+
+# Match abundance data to environmental data
+
+```{r}
+# Match abundance data to environmental data (envctd)
+env_rows <- rownames(envctd)  # Get row names from environmental data
+abun_rows <- rownames(abun)  # Get row names from abundance data
+
+# Identify discrepancies between the two datasets
+rows_in_env_not_abun <- env_rows[!(env_rows %in% abun_rows)]
+rows_in_abun_not_env <- abun_rows[!(abun_rows %in% env_rows)]
+
+# Print mismatched rows
+print("Rows in env_tidy but not in abun:")
+print(rows_in_env_not_abun)
+
+print("Rows in abun but not in env_tidy:")
+print(rows_in_abun_not_env)
+
+# Remove rows from abundance data that are not in the environmental data
+rows_to_remove <- rows_in_abun_not_env
+abun_filtered <- abun[!(rownames(abun) %in% rows_to_remove), ]
+
+# Ensure the datasets now have matching row counts
+nrow(abun_filtered)
+nrow(envctd)
+```
+
+# Change col names for env 
+
+They're full of spaces and units so its all a bit tricky
+
+```{r}
+new_names <- c("Depth", "Location", "Temperature", "Salinity", "Oxygen", "Methane")
+envctd <- envctd %>% 
+  rename_all(~ new_names)
+```
+
+# Perform NMDS analysis
+
+```{r}
+abun_four_rt <- abun_filtered %>%
+  mutate(across(everything(), ~ .^(1/4)))
+spp_nmds <- metaMDS(abun_four_rt)
+
+stress_valuep2 <- spp_nmds$stress # stress value of NMDS
+stress_valuep2
+```
+
+```{r}
+# NMDS scores for stations and species
+
+stn_nmds <- spp_nmds %>%
+  scores(display = "sites") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "sites")%>%
+  extract(sites, into = c("station", "CD"), regex = "^(.*?)_(.*?)$", remove = FALSE) %>%
+  extract(CD, into = c("Core", "Depth"), regex = "^(.*?)_(.*?)$", remove = TRUE)  %>%
+  unite(SC, station, Core, sep = "_", remove = FALSE) %>%
+  unite(pair, station, Depth, sep = "_", remove = FALSE) %>%
+  mutate(SC = gsub("C-", "", SC))
+
+stn_nmds
+
+spp_nmds_score <- spp_nmds %>%
+  scores(display = "species") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "species")
+
+spp_nmds_score$species_dup <- spp_nmds_score$species
+
+spp_nmds_score <- spp_nmds_score %>%
+    column_to_rownames("species_dup")
+
+head(spp_nmds_score)
+```
+
+# Perform envfit analysis
+
+```{r}
+en = envfit(spp_nmds, envctd, permutations = 999, na.rm = TRUE)
+en_coord_cont = as.data.frame(scores(en, "vectors")) * ordiArrowMul(en)  # Extract continuous variable scores
+en_coord_cat = as.data.frame(scores(en, "factors")) * ordiArrowMul(en)  # Extract categorical variable scores
+```
+
+# Plot NMDS with environmental vectors
+
+```{r}
+color_palette <- c("01" = "#7A0403FF", "03" = "#C42503FF", "04" = "#F05B12FF",
+                   "05" = "#FEA632FF", "06" = "#E1DD37FF", "07" = "#A2FC3CFF",
+                   "08" = "#46F884FF", "11" = "#18D6CBFF", "12" = "#3E9BFEFF",
+                   "13" = "#455BCDFF", "14" = "#30123BFF")
+
+
+p2 <- ggplot() +
+  geom_point(data = stn_nmds, aes(x = NMDS1, y = NMDS2, 
+                                  color = factor(station), 
+                                  shape = factor(Depth)), 
+                                size = 3.5) +
+  labs(x = "NMDS1", y = "NMDS2", 
+       color = "Station Number",
+       shape = "Core Horizon") +
+  geom_segment(aes(x = 0, y = 0, xend = NMDS1*2, yend = NMDS2*2), 
+               data = en_coord_cont, size = 1, alpha = 0.5, colour = "grey30") +
+  geom_text(data = en_coord_cont, aes(x = NMDS1*2, y = NMDS2*2), 
+            colour = "grey30", fontface = "bold", label = row.names(en_coord_cont))+
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "right",
+    axis.title.y = element_text(face = "bold", size = 12, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 12, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 10, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 10, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  ) +
+  scale_color_manual(values = color_palette)
+
+print(p2)
+```
+
+```{r}
+# Save NMDS plot with environmental vectors
+ggsave(dpi=600, height=6, width=10, units=c("in"), paste0("figures/",
+              format(Sys.time(), "%Y-%m-%d_"),
+              "nmds_envctd_bionum.jpg"))
+```

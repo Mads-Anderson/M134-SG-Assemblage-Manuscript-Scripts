@@ -1,0 +1,210 @@
+---
+title: "MA_M134_SO_Comparison"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup}
+rm(list = ls())
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, tidy.opts = list(
+    width.cutoff = 60))
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(vegan)
+library(ggplot2)
+library(ggrepel)
+library(ggpubr)
+```
+
+```{r}
+# Load the Southern Ocean data
+full_combined <- read_csv("Anderson_Pape_Linse_M134_SO_Combined.csv") 
+```
+
+# NMDS analysis
+
+```{r}
+# Create a new data frame 'abun_hel2' by applying a square root transformation to all columns of 'full_combined'
+abun_hel2 <- full_combined %>% 
+  mutate(across(everything(), sqrt))  # Apply 'sqrt()' to each column in the data frame
+
+# Perform Non-metric Multidimensional Scaling (NMDS) on the transformed data 'abun_hel2'
+# Specify Bray-Curtis dissimilarity for calculating distances
+spp_nmds <- metaMDS(abun_hel2, distance = "bray") 
+```
+
+```{r}
+# Extract NMDS scores for sites from the NMDS analysis 'spp_nmds'
+stn_nmds <- spp_nmds %>%
+  # 'scores()' retrieves the NMDS scores; 'display = "sites"' indicates we're extracting site scores
+  scores(display = "sites") %>%
+  # Convert the scores into a data frame
+  as.data.frame() %>%
+  # Add row names as a new column 'sites'
+  rownames_to_column(var = "sites")
+
+# Species richness calculation:
+# Convert all abundance values to 1 (present) or 0 (absent) using 'ifelse()' in each column
+padf <- full_combined %>%
+  mutate(across(everything(), ~ ifelse(. > 0, 1, 0))) %>%
+  # Calculate species richness for each row by summing across columns (count of species present)
+  mutate(sp_rich = rowSums(across(everything())))
+
+# Add the calculated species richness ('sp_rich') from 'padf' to the 'stn_nmds' data frame
+stn_nmds <- stn_nmds %>%
+  # Use 'mutate()' to add 'sp_rich' to the 'stn_nmds' data frame
+  mutate(sp_rich = padf$sp_rich)
+```
+
+```{r}
+# Create a new data frame 'df' containing additional information about the sites
+df <- tibble(
+  # Site identifiers
+  sites = c("IFT", "OV", "HR01", "HR02", "3S01", "3S02", "Axe", "01", "03", "04", "05", "06", "07", "08", "11", "12", "13", "14", "1", "26", "37", "48", "61", "72", "BS_118", "BS_202", "BS_217", "BS_218", "BS_225", "DP_235", "NWWS_120", "NWWS_162", "NWWS_163", "A", "B", "C"),
+  
+  # Depth values for each site
+  depth = c(249, 1150, 1174, 1054, 1121, 1311, 1024, 230, 219, 318, 369, 211, 136, 142, 359, 256, 226, 223, 309, 414, 391, 452, 468, 755, 422, 757, 532, 688, 543, 355, 494, 224, 517, 550, 610, 560),
+  
+  # Depth category (a classification of the sites based on depth)
+  depca = c(1, 3, 3, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2),
+  
+  # Carbon category for each site (could represent different types of carbon sources or carbon availability)
+  carbon = c(3, 1, 2, 3, NA, 1, 2, 2, 2, 2, 3, NA, 2, 2, 3, 2, 3, 2, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 1, 2, 2, 2, 3, 3, 3),
+  
+  # Type of carbon source (e.g., methane, hydrothermal, etc.)
+  carbonsource = c("Methane", "Hydrothermal", "Hydrothermal", "Hydrothermal", "Hydrothermal", "Hydrothermal", "Hydrothermal",  "Methane", "Methane", "Methane", "Methane", "Methane", "Methane", "Methane", "Methane", "Methane", "Methane", "Methane", "Ice-cover", "Ice-cover", "Ice-cover", "Ice-cover", "Ice-cover", "Ice-cover", "Background", "Background", "Background", "Background", "Background", "Background", "Background", "Background", "Background", "Food Bank", "Food Bank", "Food Bank"),
+  
+  # Area category where each site is located (e.g., "SG" for South Georgia, "HT NAP" for Hydrothermal)
+  area = c("SG", "HT NAP", "HT NAP", "HT NAP", "HT NAP", "HT NAP", "HT NAP", "SG", "SG", "SG", "SG", "SG", "SG", "SG", "SG", "SG", "SG", "SG", "EWS", "EWS", "EWS", "EWS", "EWS", "EWS", "NAP", "NAP", "NAP", "NAP", "NAP", "NAP", "NAP", "NAP", "NAP", "FB WAP", "FB NAP", "FB NAP")
+)
+
+# Join the 'df' data frame with 'stn_nmds' based on the 'sites' column
+# The result will combine the NMDS scores with the additional information from 'df'
+stn_nmds <- full_join(df, stn_nmds, by = "sites")
+```
+
+```{r}
+# Plot 1: NMDS with Taxa Richness
+p3 <- ggplot() + 
+  # Create a scatter plot of the NMDS1 and NMDS2 axes, 
+  # with point colors representing the taxa richness ('sp_rich')
+  geom_point(data = stn_nmds, aes(x = NMDS1, y = NMDS2, color = sp_rich), size = 3.5) +
+  # Add labels to each point, representing the 'area' variable, colored by taxa richness
+  geom_text_repel(data = stn_nmds, aes(x = NMDS1, y = NMDS2, label = area, color = sp_rich), size = 2) +
+  # Customize the axis labels and color legend
+  labs(x = "NMDS1", y = "NMDS2", color = "Taxa Richness") +
+  # Use a color scale (viridis) to represent taxa richness, with the "plasma" option
+  scale_color_viridis_c(option = "plasma") +
+  # Apply a minimal white theme to the plot
+  theme_bw(base_size = 10) +
+  # Customize additional plot aesthetics:
+  theme(
+    legend.position = "bottom",
+    axis.title.y = element_text(face = "bold", size = 12, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 12, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 12, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )
+
+# Display the plot
+p3
+
+```
+
+```{r}
+# Plot 2: NMDS with Carbon Source and Seafloor Depth
+
+# Custom color palette for the 'carbonsource' variable
+custom_palette <- c("Methane" = "dark red", "Hydrothermal" = "red", 
+                    "Ice-cover" = "dark green", "Background" = "purple", 
+                    "Food Bank" = "blue")
+
+# Custom shape mapping for 'depca' (depth category) variable
+custom_shapes <- c("1" = 16, "2" = 15, "3" = 17)
+
+# Create the plot 'pcarbon'
+pcarbon <- ggplot() +
+  # Plot the points using 'NMDS1' and 'NMDS2' as coordinates, 
+  # with color representing 'carbonsource' and shape representing 'depca' (depth category)
+  geom_point(data = stn_nmds, aes(x = NMDS1, y = NMDS2, 
+                                  color = factor(carbonsource), 
+                                  shape = factor(depca)), size = 3.5) +
+  # Add text labels to each point representing 'area' (site location), colored by 'carbonsource'
+  geom_text_repel(data = stn_nmds, aes(x = NMDS1, y = NMDS2, label = area, 
+                                       color = carbonsource), size = 2) +
+  # Customize axis labels and legends
+  labs(x = "NMDS1", y = "NMDS2", shape = "Seafloor Depth", color = "Carbon") +
+  # Use a discrete viridis color scale for 'carbonsource'
+  scale_color_viridis_d(option = "viridis", direction = -1) +
+  # Apply a clean white background theme to the plot
+  theme_bw(base_size = 10) +
+  # Customize various plot elements
+  theme(
+    legend.position = "bottom",
+    axis.title.y = element_text(face = "bold", size = 12, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 12, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, 
+                               colour = "black", size = 12, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  ) +
+  # Customize the legend to display in a grid with 3 columns, 
+  # and place the items in rows (byrow = TRUE)
+  guides(colour = guide_legend(ncol = 3, byrow = TRUE), 
+         shape = guide_legend(ncol = 3, byrow = TRUE))
+
+# Display the plot
+pcarbon
+
+```
+
+# Combine the two plots
+
+```{r}
+# Combine the two plots (p3 and pcarbon) into a single figure
+combined_plot <- ggarrange(p3, pcarbon, 
+                           # Add labels to each subplot, 'A' for p3 and 'B' for pcarbon
+                           labels = c("A", "B"),
+                           # Set common legend to FALSE to avoid merging legends across plots
+                           common.legend = FALSE, 
+                           # Position the legend at the bottom of the figure (if required for future adjustments)
+                           legend = "bottom",
+                           # Set equal heights and widths for both plots to ensure they are aligned
+                           heights = c(1, 1), 
+                           widths = c(1, 1),
+                           # Align both plots horizontally and vertically to maintain consistent alignment
+                           align = "hv")
+
+# Display the combined plot
+combined_plot
+
+```
+
+```{r}
+# Save the combined plot (combined_plot) to a file with high resolution
+ggsave(
+  dpi = 600,  # Set the resolution of the saved image to 600 dpi for high quality
+  height = 7, # Set the height of the image to 7 inches
+  width = 14, # Set the width of the image to 14 inches
+  units = c("in"),  # Specify the units for the height and width (inches)
+  
+  # Construct the file name dynamically using the current date
+  filename = paste0(
+    "figures/",  # Save the file in the 'figures' directory
+    format(Sys.time(), "%Y-%m-%d_"),  # Format the current date as 'YYYY-MM-DD'
+    "combined_nmds.jpg"  # Add a custom file name suffix
+  )
+)
+```

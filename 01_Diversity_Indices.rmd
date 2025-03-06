@@ -1,0 +1,59 @@
+---
+title: "MA_M134_Diversity_Indices"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())  # Clear the workspace
+```
+
+# Load necessary libraries
+
+```{r}
+library(readxl)    # For reading Excel files
+library(tidyverse) # For data manipulation (includes dplyr)
+library(vegan)     # For calculating diversity indices
+library(openxlsx)  # For writing Excel files
+```
+
+```{r}
+# Read the Excel file and select the relevant sheet
+spp_muc <- read_csv(
+  "Anderson_Pape_Linse_M134_NormSppCorHor.csv") %>%
+  rename(MUC = `...1`) %>%  # Rename the first column to "MUC"
+  column_to_rownames("MUC") # Set "MUC" as the row names
+
+# Display the data
+spp_muc
+```
+
+# Calculate diversity indices
+
+```{r}
+shannondiv <- diversity(spp_muc, index = "shannon", equalize.groups = FALSE, MARGIN = 1, base = exp(1))  # Shannon diversity index
+invsimpsondiv <- diversity(spp_muc, index = "invsimpson", equalize.groups = FALSE, MARGIN = 1, base = exp(1))  # Inverse Simpson diversity index
+sppr <- specnumber(spp_muc, MARGIN = 1) # Species richness
+pielou_evenness <- shannondiv / log(sppr)  # Pielou's Evenness index
+```
+
+```{r}
+# Get the station numbers from the row names
+station_numbers <- rownames(spp_muc)
+
+# Combine the calculated indices into a data frame
+diversity_table <- data.frame(
+  Station_Number = station_numbers,
+  Species_Richness = sppr,
+  Shannon_Diversity = shannondiv,
+  Inverse_Simpson_Diversity = invsimpsondiv,
+  Pielou_Evenness = pielou_evenness
+)
+
+# Write the diversity indices to an Excel file
+write.xlsx(
+  diversity_table,
+  file = "Diversity_Indices.xlsx",
+  overwrite = TRUE)
+```

@@ -1,0 +1,238 @@
+---
+title: "MA_M134_Biol_Then_Environmental_And_Biol_Analyses"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup}
+rm(list = ls())
+knitr::opts_chunk$set(
+  message = FALSE, warning = FALSE, tidy.opts = list(
+    width.cutoff = 60))
+```
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(readxl)
+library(vegan)
+library(ggplot2)
+library(ggordiplots)
+library(ggpubr)
+```
+
+```{r}
+# load in the abundance data
+abun <- read_csv("Anderson_Pape_Linse_M134_NormSppCorHor.csv")%>%
+  rename(MUC = `...1`)%>%
+  column_to_rownames(var= "MUC")
+
+# Load species absolute abundance data
+spp_abs <- read_excel("Anderson_Pape_Linse_M134_AbsSppCorHor.csv") %>%
+  rename(Core = `...1`) %>%  # Rename first unnamed column to 'Core'
+  column_to_rownames("Core")  # Set 'Core' as row names
+
+# Load species list (from supplementary table)
+spp_list <- read_csv("TaxaList.csv")
+```
+
+# Remove singleton species (those with less than 2 individuals) from the abundance dataset
+
+```{r}
+# Remove singleton species (less than 2 individuals)
+spp_abs_tot <- colSums(spp_abs)  # Sum species occurrences
+spp_to_remove <- spp_abs_tot[spp_abs_tot < 2]  # Identify singleton species
+filtered_df <- data.frame(Species = names(spp_to_remove), Total_Individuals = spp_to_remove)
+abun <- abun[, !names(abun) %in% names(spp_to_remove)]  # Remove singleton species
+
+# Remove specific rows from abundance dataset
+abun <- abun %>%
+  rownames_to_column(var = "rowname") %>%
+  filter(!(rowname %in% c("01_x_2-5", "04_C-10_0-2", "04_C-10_2-5"))) %>%
+  column_to_rownames(var = "rowname")
+```
+
+# NMDS of biol only 
+
+```{r}
+# Perform SIMPER analysis on the abundance data
+simper_results <- simper(abun)
+print(simper_results)
+simper_results
+```
+
+```{r}
+# Hellinger transformation and NMDS (Non-metric Multidimensional Scaling) using Bray-Curtis dissimilarity
+abun_hel <- decostand(abun, method = "hellinger")
+spp_nmds <- metaMDS(abun_hel, distance = "bray")
+
+stressplot(spp_nmds)    # Plot stress vs. number of dimensions
+
+# Extract and print the stress value of the NMDS
+stress_valuep <- spp_nmds$stress
+stress_valuep
+```
+
+```{r}
+# Extract NMDS scores for sites
+stn_nmds <- spp_nmds %>%
+  scores(display = "sites") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "sites")%>%
+  extract(sites, into = c("station", "CD"), regex = "^(.*?)_(.*?)$", remove = FALSE) %>%
+  extract(CD, into = c("Core", "Depth"), regex = "^(.*?)_(.*?)$", remove = TRUE)  %>%
+  unite(SC, station, Core, sep = "_", remove = FALSE) %>%
+  unite(pair, station, Depth, sep = "_", remove = FALSE) %>%
+  mutate(SC = gsub("C-", "", SC))
+
+# Extract NMDS scores for species
+spp_nmds_score <- spp_nmds %>%
+  scores(display = "species") %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "species")
+
+spp_nmds_score$species_dup <- spp_nmds_score$species
+
+spp_nmds_score <- spp_nmds_score %>%
+    column_to_rownames("species_dup")
+```
+
+# Identify rows that exist in one dataset but not the other
+
+```{r}
+spp_nmds_score_rows <- rownames(spp_nmds_score)
+spp_list_rows <- rownames(spp_list)
+
+rows_in_spp_nmds_score_not_spp_list <- spp_nmds_score_rows[!(spp_nmds_score_rows %in% spp_list_rows)]
+rows_in_spp_list_not_spp_nmds_score <- spp_list_rows[!(spp_list_rows %in% spp_nmds_score_rows)]
+
+# Print out discrepancies between the two lists
+
+print("Rows in spp_nmds_score but not in spp list:")
+print(rows_in_spp_nmds_score_not_spp_list)
+
+print("Rows in spp list but not in spp_nmds_score:")
+print(rows_in_spp_list_not_spp_nmds_score)
+```
+
+```{r}
+# Remove rows from spp_list that are not present in spp_nmds_score
+rows_to_remove2 <- rows_in_spp_list_not_spp_nmds_score
+spp_list_filtered <- spp_list[!(rownames(spp_list) %in% rows_to_remove2), ]
+
+# Check that the number of rows match between the filtered lists
+
+nrow(spp_list_filtered)
+nrow(spp_nmds_score)
+```
+
+# Reorder spp_nmds_score to match the order in spp_list_filtered
+
+This is important to match the numbers from the full taxa list 
+
+```{r}
+row_names <- rownames(spp_list_filtered)
+spp_nmds_ordered <- spp_nmds_score[row_names, , drop = FALSE]
+spp_nmds_ordered
+```
+
+# Load a taxa list and merge it with the reordered NMDS scores
+
+```{r}
+taxa_list <- read_excel(
+  "Tables.xlsx",
+  sheet = "TaxaList") %>% 
+  rename(species = `...1`) %>%
+  column_to_rownames("species")
+
+# Align row names in NMDS scores with the taxa list and merge
+rownames(spp_nmds_ordered) <- spp_nmds_ordered$Common_Row_Names
+rownames(taxa_list) <- taxa_list$Common_Row_Names
+
+merged_df <- merge(spp_nmds_ordered, taxa_list, by = "row.names", all.x = TRUE)
+
+merged_df <- merged_df[, -1]
+
+spp_nmds_ordered <- merged_df
+```
+
+# Filter the key species identified from SIMPER results
+
+```{r}
+key_species <-  c(
+    "Nematode spp", "Cirratulidae sp. 1 (Poly sp. 5)",
+    "Maldanidae sp. 2 (Poly sp. 41)", "Orbiniidae sp. 1 (Poly sp. 9)",
+    "Capetillidae sp. 1 (Poly sp. 10)", "Hesionidae sp. 1 (Poly sp. 4)",
+    "Thyasira sp. 1", "Nemertea sp. 2 (Poly sp. 15)",
+    "Desmosomatidae sp. 1", "Trichobranchidae (Poly sp. 39)",
+    "Maldanidae sp. 1 (Poly sp. 50)", "Nephytidae sp. 1 (Poly sp. 1)",
+    "Sternaspidae (Poly sp. 29 - owl worms)", "cf. Paraonidae sp. 1 (Poly sp. 22)")
+
+# Filter the NMDS scores dataframe (spp_nmds_ordered) to keep only the key species
+key_spp_nmds <- spp_nmds_ordered %>%
+  filter(species %in% key_species)
+```
+
+```{r}
+# Define the shape mapping based on core horizon
+shape_mapping <- c("0-2" = 16,  # Circle
+                   "2-5" = 17,  # Triangle
+                   "0-5" = 15)  # Square
+
+# Rename station names to more descriptive labels
+station_replacements <- c(
+  "01" = "KHT 01", "03" = "DF 03", "04" = "DF 04",
+  "05" = "CT 05", "06" = "CT 06", "07" = "CB 07",
+  "08" = "CB 08", "11" = "AK-W 11", "12" = "AK-E 12",
+  "13" = "RB 13", "14" = "RB 14"
+)
+
+# Apply the station name replacements in the NMDS scores dataframe
+stn_nmds <- stn_nmds %>%
+  mutate(station = recode(station, !!!station_replacements))
+
+# Define a colour palette for the stations
+color_palette <- c("KHT 01" = "#7A0403FF", "DF 03" = "#C42503FF", "DF 04" = "#F05B12FF",
+                   "CT 05" = "#FEA632FF", "CT 06" = "#E1DD37FF", "CB 07" = "#A2FC3CFF",
+                   "CB 08" = "#46F884FF", "AK-W 11" = "#18D6CBFF", "AK-E 12" = "#3E9BFEFF",
+                   "RB 13" = "#455BCDFF", "RB 14" = "#30123BFF")
+
+# Reorder the 'station' factor levels to match the colour palette
+stn_nmds <- stn_nmds %>%
+  mutate(station = factor(station, levels = names(color_palette)))
+
+# Create a scatterplot of the NMDS results
+p <- ggplot() +
+  geom_point(data = stn_nmds, aes(x = NMDS1, y = NMDS2, 
+                                  color = factor(station), 
+                                  shape = factor(Depth)),  # Using Depth directly for shape mapping
+             size = 3.5) +
+  geom_text(data = key_spp_nmds, aes(x = NMDS1, y = NMDS2, label = Row_Number),
+            size = 5, color = "grey50") + 
+  labs(x = "NMDS1", y = "NMDS2", 
+       color = "Station",
+       shape = "Core Horizon") +
+  scale_color_manual(values = color_palette) +
+  scale_shape_manual(values = shape_mapping) +  # Applying the shape mapping
+  theme_bw(base_size = 10) +
+  theme(
+    legend.position = "bottom",
+    axis.title.y = element_text(face = "bold", size = 12, colour = "black"),
+    axis.title.x = element_text(face = "bold", size = 12, colour = "black"),
+    axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1, colour = "black", size = 10, face = "bold"),
+    axis.text.y = element_text(colour = "black", size = 12, face = "bold"),
+    legend.text = element_text(size = 6, face = "bold", colour = "black"),
+    legend.title = element_text(size = 8, colour = "black", face = "bold"),
+    panel.background = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, size = 1.2)
+  )+
+  guides(colour = guide_legend(ncol = 3, order = 1),
+    shape = guide_legend(nrow = 1, order = 2))
+```
+
+```{r}
+ggsave(dpi=600, height=7, width=14, units=c("in"), paste0("figures/",
+              format(Sys.time(), "%Y-%m-%d_"),
+              "nmds.jpg"))
+```
